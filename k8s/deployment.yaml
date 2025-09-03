@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: session-manager
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: session-manager
+  template:
+    metadata:
+      labels:
+        app: session-manager
+    spec:
+      serviceAccountName: session-manager-sa
+      containers:
+        - name: manager
+          # TODO: Set to your built image in Artifact Registry, e.g.:
+          # image: asia-south1-docker.pkg.dev/first-cedar-470107-j2/session-manager/session-manager:latest
+          image: session-manager:latest
+          ports:
+            - containerPort: 80
+          env:
+            - name: VNC_IMAGE_TAG
+              value: "your-latest-git-sha"

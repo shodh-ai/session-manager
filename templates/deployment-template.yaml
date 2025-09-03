@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: session-{{SESSION_ID}}
+  labels:
+    app: session-{{SESSION_ID}}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: session-{{SESSION_ID}}
+  template:
+    metadata:
+      labels:
+        app: session-{{SESSION_ID}}
+    spec:
+      containers:
+        - name: session-bubble
+          image: asia-south1-docker.pkg.dev/first-cedar-470107-j2/session-bubble/session-bubble:{{IMAGE_TAG}}
+          ports:
+            - name: vnc-stream
+              containerPort: 6901
+            - name: command-ws
+              containerPort: 8765
+          # Add resources/env as needed to mirror your working spec

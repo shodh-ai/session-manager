@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: service-{{SESSION_ID}}
+spec:
+  selector:
+    app: session-{{SESSION_ID}}
+  ports:
+    - name: vnc-stream
+      port: 6901
+      targetPort: 6901
+    - name: command-ws
+      port: 8765
+      targetPort: 8765
+  type: ClusterIP
