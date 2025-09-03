@@ -12,8 +12,8 @@ env:
   IMAGE_NAME: session-manager
   DEPLOYMENT_NAME: session-manager
   # Set these to your cluster
-  GKE_CLUSTER: ${{ vars.GKE_CLUSTER }}
-  GKE_LOCATION: ${{ vars.GKE_LOCATION }}
+  GKE_CLUSTER: session-bubble-cluster-1
+  GKE_LOCATION: asia-south1
 
 permissions:
   contents: read
