@@ -1,0 +1,10 @@
+apiVersion: cloud.google.com/v1
+kind: BackendConfig
+metadata:
+  name: session-manager-backendconfig
+spec:
+  timeoutSec: 60
+  healthCheck:
+    type: HTTP
+    port: 80
+    requestPath: /health

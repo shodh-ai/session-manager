@@ -40,8 +40,9 @@ def render_template(template_name: str, session_id: str) -> dict:
     return yaml.safe_load(rendered_str)
 
 
-@app.get("/health")
-async def health():
+@app.get("/health", status_code=200)
+async def health_check():
+    """A simple health check endpoint."""
     return {"status": "ok"}
 
 
