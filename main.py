@@ -1,4 +1,5 @@
 import os
+import time
 import uuid
 import yaml
 from fastapi import FastAPI, HTTPException
@@ -41,6 +42,51 @@ def render_template(template_name: str, session_id: str) -> dict:
     return yaml.safe_load(rendered_str)
 
 
+def _wait_for_deployment_ready(deployment_name: str, namespace: str, timeout_seconds: int = 180) -> bool:
+    """Poll the Deployment status until at least one replica is ready or timeout."""
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        try:
+            dep = apps_v1.read_namespaced_deployment_status(name=deployment_name, namespace=namespace)
+            status = dep.status
+            ready = (getattr(status, "ready_replicas", 0) or 0) >= 1
+            available = (getattr(status, "available_replicas", 0) or 0) >= 1
+            if ready and available:
+                return True
+        except client.ApiException as e:
+            # If not found yet, give it a moment
+            if e.status != 404:
+                raise
+        time.sleep(2)
+    return False
+
+
+def _endpoints_has_addresses(ep) -> bool:
+    """Return True if the Endpoints object has at least one ready address in any subset."""
+    if not ep or not ep.subsets:
+        return False
+    for subset in ep.subsets:
+        addrs = getattr(subset, "addresses", None)
+        if addrs and len(addrs) > 0:
+            return True
+    return False
+
+
+def _wait_for_service_endpoints(service_name: str, namespace: str, timeout_seconds: int = 120) -> bool:
+    """Poll the Service Endpoints until at least one address is ready or timeout."""
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        try:
+            ep = core_v1.read_namespaced_endpoints(name=service_name, namespace=namespace)
+            if _endpoints_has_addresses(ep):
+                return True
+        except client.ApiException as e:
+            if e.status != 404:
+                raise
+        time.sleep(2)
+    return False
+
+
 @app.get("/health", status_code=200)
 async def health_check():
     """A simple health check endpoint."""
@@ -71,6 +117,24 @@ async def create_session():
         # Best-effort cleanup
         await delete_session(session_id)
         raise HTTPException(status_code=500, detail=f"Kubernetes API error: {e.reason}")
+
+    # Wait for readiness to reduce race conditions when the client connects
+    deployment_name = f"session-{session_id}"
+    service_name = f"service-{session_id}"
+    dep_ready = False
+    svc_ready = False
+    try:
+        dep_ready = _wait_for_deployment_ready(deployment_name, namespace, timeout_seconds=180)
+        svc_ready = _wait_for_service_endpoints(service_name, namespace, timeout_seconds=120)
+    except client.ApiException as e:
+        # Cleanup if readiness check fails due to API errors
+        await delete_session(session_id)
+        raise HTTPException(status_code=500, detail=f"Kubernetes readiness check error: {e.reason}")
+
+    if not dep_ready or not svc_ready:
+        # Cleanup and return a 504 to indicate the environment did not become ready in time
+        await delete_session(session_id)
+        raise HTTPException(status_code=504, detail="Session environment did not become ready in time. Please try again.")
 
     # Return endpoints
     return SessionResponse(
