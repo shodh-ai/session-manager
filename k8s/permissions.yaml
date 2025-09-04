@@ -9,11 +9,11 @@ metadata:
   name: session-manager-role
 rules:
   - apiGroups: ["apps"]
-    resources: ["deployments"]
-    verbs: ["create", "delete", "get"]
+    resources: ["deployments", "deployments/status"]
+    verbs: ["create", "delete", "get", "list", "watch"]
   - apiGroups: [""]
-    resources: ["services"]
-    verbs: ["create", "delete", "get"]
+    resources: ["services", "endpoints"]
+    verbs: ["create", "delete", "get", "list", "watch"]
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses"]
     verbs: ["create", "delete", "get"]

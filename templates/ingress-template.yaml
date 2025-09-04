@@ -7,17 +7,17 @@ metadata:
     cloud.google.com/backend-config: '{"ports": {"command-ws":"session-bubble-backendconfig", "vnc-stream":"vnc-stream-backendconfig"}}'
 spec:
   rules:
-    - host: vnc.shodh.ai
+    - host: {{SESSION_ID}}.vnc.shodh.ai
       http:
         paths:
-          - path: /{{SESSION_ID}}/stream
+          - path: /stream
             pathType: Prefix
             backend:
               service:
                 name: service-{{SESSION_ID}}
                 port:
                   name: vnc-stream
-          - path: /{{SESSION_ID}}/command
+          - path: /command
             pathType: Prefix
             backend:
               service:

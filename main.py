@@ -167,8 +167,8 @@ def _create_session_worker(job_id: str) -> None:
         job_status[job_id] = {
             "status": "READY",
             "sessionId": session_id,
-            "commandUrl": f"wss://vnc.shodh.ai/{session_id}/command",
-            "streamUrl": f"wss://vnc.shodh.ai/{session_id}/stream",
+            "commandUrl": f"wss://{session_id}.vnc.shodh.ai/command",
+            "streamUrl": f"wss://{session_id}.vnc.shodh.ai/stream",
         }
         return
 
