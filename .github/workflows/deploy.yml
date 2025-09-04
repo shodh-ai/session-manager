@@ -50,14 +50,12 @@ jobs:
           location: ${{ env.GKE_LOCATION }}
 
       - name: Build and Push Docker Image
-        working-directory: session-manager
         run: |
           IMAGE_PATH="${GAR_HOSTNAME}/${PROJECT_ID}/${IMAGE_REPOSITORY}/${IMAGE_NAME}:${GITHUB_SHA}"
           docker build -t "$IMAGE_PATH" .
           docker push "$IMAGE_PATH"
 
       - name: Deploy Session Manager to GKE
-        working-directory: session-manager
         run: |
           IMAGE_PATH="${GAR_HOSTNAME}/${PROJECT_ID}/${IMAGE_REPOSITORY}/${IMAGE_NAME}:${GITHUB_SHA}"
           # Apply RBAC and service/deployment
