@@ -18,5 +18,13 @@ spec:
           # TODO: Set to your built image in Artifact Registry, e.g.:
           # image: asia-south1-docker.pkg.dev/first-cedar-470107-j2/session-manager/session-manager:latest
           image: session-manager:latest
+          volumeMounts:
+            - name: templates
+              mountPath: /app/templates
+              readOnly: true
           ports:
             - containerPort: 80
+      volumes:
+        - name: templates
+          configMap:
+            name: session-manager-templates
