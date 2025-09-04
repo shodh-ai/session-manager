@@ -47,6 +47,7 @@ async def health_check():
 
 
 @app.post("/sessions", response_model=SessionResponse)
+@app.post("/api/sessions", response_model=SessionResponse)
 async def create_session():
     """Create a new isolated session by provisioning Deployment, Service, and Ingress."""
     session_id = f"sess-{uuid.uuid4().hex[:8]}"
@@ -79,6 +80,7 @@ async def create_session():
 
 
 @app.delete("/sessions/{session_id}", status_code=204)
+@app.delete("/api/sessions/{session_id}", status_code=204)
 async def delete_session(session_id: str):
     """Delete all K8s resources for a given session."""
     namespace = os.environ.get("K8S_NAMESPACE", "default")
