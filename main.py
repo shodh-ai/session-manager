@@ -5,6 +5,8 @@ import yaml
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from kubernetes import client, config
+import threading
+from typing import Dict, Optional
 from kubernetes.config.config_exception import ConfigException
 
 # --- Load Kubernetes configuration ---
@@ -30,6 +32,22 @@ class SessionResponse(BaseModel):
     sessionId: str
     commandUrl: str
     streamUrl: str
+
+
+# --- Job-based session creation data models and storage ---
+job_status: Dict[str, dict] = {}
+
+
+class SessionStartResponse(BaseModel):
+    jobId: str
+
+
+class SessionStatusResponse(BaseModel):
+    status: str  # "PENDING" | "READY" | "FAILED"
+    sessionId: Optional[str] = None
+    commandUrl: Optional[str] = None
+    streamUrl: Optional[str] = None
+    error: Optional[str] = None
 
 
 def render_template(template_name: str, session_id: str) -> dict:
@@ -87,69 +105,8 @@ def _wait_for_service_endpoints(service_name: str, namespace: str, timeout_secon
     return False
 
 
-@app.get("/health", status_code=200)
-async def health_check():
-    """A simple health check endpoint."""
-    return {"status": "ok"}
-
-
-@app.post("/sessions", response_model=SessionResponse)
-@app.post("/api/sessions", response_model=SessionResponse)
-async def create_session():
-    """Create a new isolated session by provisioning Deployment, Service, and Ingress."""
-    session_id = f"sess-{uuid.uuid4().hex[:8]}"
-    namespace = os.environ.get("K8S_NAMESPACE", "default")
-
-    try:
-        # 1) Deployment
-        deployment_body = render_template("deployment-template.yaml", session_id)
-        apps_v1.create_namespaced_deployment(namespace=namespace, body=deployment_body)
-
-        # 2) Service
-        service_body = render_template("service-template.yaml", session_id)
-        core_v1.create_namespaced_service(namespace=namespace, body=service_body)
-
-        # 3) Ingress
-        ingress_body = render_template("ingress-template.yaml", session_id)
-        networking_v1.create_namespaced_ingress(namespace=namespace, body=ingress_body)
-
-    except client.ApiException as e:
-        # Best-effort cleanup
-        await delete_session(session_id)
-        raise HTTPException(status_code=500, detail=f"Kubernetes API error: {e.reason}")
-
-    # Wait for readiness to reduce race conditions when the client connects
-    deployment_name = f"session-{session_id}"
-    service_name = f"service-{session_id}"
-    dep_ready = False
-    svc_ready = False
-    try:
-        dep_ready = _wait_for_deployment_ready(deployment_name, namespace, timeout_seconds=180)
-        svc_ready = _wait_for_service_endpoints(service_name, namespace, timeout_seconds=120)
-    except client.ApiException as e:
-        # Cleanup if readiness check fails due to API errors
-        await delete_session(session_id)
-        raise HTTPException(status_code=500, detail=f"Kubernetes readiness check error: {e.reason}")
-
-    if not dep_ready or not svc_ready:
-        # Cleanup and return a 504 to indicate the environment did not become ready in time
-        await delete_session(session_id)
-        raise HTTPException(status_code=504, detail="Session environment did not become ready in time. Please try again.")
-
-    # Return endpoints
-    return SessionResponse(
-        sessionId=session_id,
-        commandUrl=f"wss://vnc.shodh.ai/{session_id}/command",
-        streamUrl=f"wss://vnc.shodh.ai/{session_id}/stream",
-    )
-
-
-@app.delete("/sessions/{session_id}", status_code=204)
-@app.delete("/api/sessions/{session_id}", status_code=204)
-async def delete_session(session_id: str):
-    """Delete all K8s resources for a given session."""
-    namespace = os.environ.get("K8S_NAMESPACE", "default")
-
+def _cleanup_k8s_resources(session_id: str, namespace: str) -> None:
+    """Best-effort cleanup of K8s resources for a given session (sync)."""
     # Delete Deployment
     try:
         apps_v1.delete_namespaced_deployment(name=f"session-{session_id}", namespace=namespace)
@@ -171,4 +128,88 @@ async def delete_session(session_id: str):
         if e.status != 404:
             print(f"Error deleting ingress: {e.reason}")
 
+
+def _create_session_worker(job_id: str) -> None:
+    """Background worker to create K8s resources and wait for readiness, updating job_status."""
+    session_id = f"sess-{uuid.uuid4().hex[:8]}"
+    namespace = os.environ.get("K8S_NAMESPACE", "default")
+
+    job_status[job_id] = {"status": "PENDING"}
+
+    try:
+        # Create Deployment
+        deployment_body = render_template("deployment-template.yaml", session_id)
+        apps_v1.create_namespaced_deployment(namespace=namespace, body=deployment_body)
+
+        # Create Service
+        service_body = render_template("service-template.yaml", session_id)
+        core_v1.create_namespaced_service(namespace=namespace, body=service_body)
+
+        # Create Ingress
+        ingress_body = render_template("ingress-template.yaml", session_id)
+        networking_v1.create_namespaced_ingress(namespace=namespace, body=ingress_body)
+
+        # Wait for readiness
+        deployment_name = f"session-{session_id}"
+        service_name = f"service-{session_id}"
+        dep_ready = _wait_for_deployment_ready(deployment_name, namespace, timeout_seconds=180)
+        svc_ready = _wait_for_service_endpoints(service_name, namespace, timeout_seconds=120)
+
+        if not dep_ready or not svc_ready:
+            _cleanup_k8s_resources(session_id, namespace)
+            job_status[job_id] = {
+                "status": "FAILED",
+                "error": "Session environment did not become ready in time. Please try again.",
+            }
+            return
+
+        # Success
+        job_status[job_id] = {
+            "status": "READY",
+            "sessionId": session_id,
+            "commandUrl": f"wss://vnc.shodh.ai/{session_id}/command",
+            "streamUrl": f"wss://vnc.shodh.ai/{session_id}/stream",
+        }
+        return
+
+    except Exception as e:
+        # Failure path
+        try:
+            _cleanup_k8s_resources(session_id, namespace)
+        except Exception:
+            pass
+        job_status[job_id] = {"status": "FAILED", "error": str(e)}
+
+
+@app.get("/health", status_code=200)
+async def health_check():
+    """A simple health check endpoint."""
+    return {"status": "ok"}
+
+
+@app.post("/sessions", response_model=SessionStartResponse, status_code=202)
+@app.post("/api/sessions", response_model=SessionStartResponse, status_code=202)
+async def start_session_creation():
+    """Start a background job to create a session and return a job ID immediately."""
+    job_id = f"job-{uuid.uuid4().hex[:8]}"
+    thread = threading.Thread(target=_create_session_worker, args=(job_id,), daemon=True)
+    thread.start()
+    return SessionStartResponse(jobId=job_id)
+
+
+@app.get("/sessions/status/{job_id}", response_model=SessionStatusResponse)
+@app.get("/api/sessions/status/{job_id}", response_model=SessionStatusResponse)
+async def get_session_status(job_id: str):
+    status = job_status.get(job_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="Job not found.")
+    return status
+
+
+@app.delete("/sessions/{session_id}", status_code=204)
+@app.delete("/api/sessions/{session_id}", status_code=204)
+async def delete_session(session_id: str):
+    """Delete all K8s resources for a given session."""
+    namespace = os.environ.get("K8S_NAMESPACE", "default")
+    _cleanup_k8s_resources(session_id, namespace)
     return {}
