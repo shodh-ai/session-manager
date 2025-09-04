@@ -20,6 +20,3 @@ spec:
           image: session-manager:latest
           ports:
             - containerPort: 80
-          env:
-            - name: VNC_IMAGE_TAG
-              value: "your-latest-git-sha"

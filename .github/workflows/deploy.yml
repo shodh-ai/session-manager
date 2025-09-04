@@ -62,7 +62,6 @@ jobs:
           kubectl apply -f k8s/permissions.yaml
           kubectl apply -f k8s/service.yaml
           kubectl apply -f k8s/deployment.yaml
-          # Set image and env var for VNC bubble tag
+          # Set the manager's own image
           kubectl set image deployment/${DEPLOYMENT_NAME} manager="${IMAGE_PATH}"
-          kubectl set env deployment/${DEPLOYMENT_NAME} VNC_IMAGE_TAG="${GITHUB_SHA}"
           kubectl rollout status deployment/${DEPLOYMENT_NAME}

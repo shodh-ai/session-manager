@@ -19,7 +19,8 @@ core_v1 = client.CoreV1Api()
 networking_v1 = client.NetworkingV1Api()
 
 # Image tag for the session bubble image
-VNC_IMAGE_TAG = os.environ.get("VNC_IMAGE_TAG", "latest")
+# The manager's job is to always deploy the latest stable VNC image.
+VNC_IMAGE_TAG = "latest"
 
 app = FastAPI()
 
