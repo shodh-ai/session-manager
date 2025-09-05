@@ -23,3 +23,17 @@ spec:
             - name: command-ws
               containerPort: 8765
           # Add resources/env as needed to mirror your working spec
+        # Health sidecar to satisfy HTTP health checks from GCE Ingress
+        - name: healthz
+          image: gcr.io/google-samples/hello-app:1.0
+          ports:
+            - containerPort: 8080
+        # WebSocket proxy for VNC stream: terminates WS and forwards to raw VNC on 6901
+        - name: websockify
+          image: websockify/websockify:latest
+          args:
+            - 0.0.0.0:6902
+            - 127.0.0.1:6901
+          ports:
+            - containerPort: 6902
+              name: vnc-ws

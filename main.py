@@ -8,6 +8,7 @@ from kubernetes import client, config
 import threading
 from typing import Dict, Optional
 from kubernetes.config.config_exception import ConfigException
+import re
 
 # --- Load Kubernetes configuration ---
 # When running in-cluster on GKE, this will auto-configure. Fallback to local kubeconfig for dev.
@@ -229,6 +230,64 @@ def _remove_session_from_main_ingress(session_id: str, namespace: str) -> None:
         networking_v1.patch_namespaced_ingress(name=ingress_name, namespace=namespace, body=ing)
 
 
+def _reconcile_ingress_sessions(namespace: str = "default", interval_seconds: int = 30) -> None:
+    """Background loop that prunes stale session hosts from the shared Ingress.
+
+    Any host like sess-XXXXXXXX.vnc.shodh.ai whose corresponding Service
+    (service-sess-XXXXXXXX) no longer exists will be removed from the Ingress
+    rules and TLS hosts. This prevents the GCLB controller from failing
+    translation due to dead backends, and eliminates the need for manual url-map
+    cleanups when sessions are deleted out-of-band.
+    """
+    host_re = re.compile(r"^sess-[a-f0-9]{8}\.vnc\.shodh\.ai$")
+    ingress_name = "session-bubble-ingress"
+    while True:
+        try:
+            ing: client.V1Ingress = networking_v1.read_namespaced_ingress(
+                name=ingress_name, namespace=namespace
+            )
+            changed = False
+
+            # Build a set of live session service names for quick checks
+            rules = list(ing.spec.rules or [])
+            to_keep = []
+            stale_hosts = set()
+            for r in rules:
+                h = getattr(r, "host", "") or ""
+                if host_re.match(h):
+                    sess_id = h.split(".")[0]  # e.g., sess-xxxxxxxx
+                    svc_name = f"service-{sess_id}"
+                    try:
+                        core_v1.read_namespaced_service(name=svc_name, namespace=namespace)
+                        to_keep.append(r)
+                    except client.ApiException as e:
+                        if e.status == 404:
+                            stale_hosts.add(h)
+                            changed = True
+                        else:
+                            # Non-404 errors: keep rule, try next round
+                            to_keep.append(r)
+                    except Exception:
+                        to_keep.append(r)
+                else:
+                    to_keep.append(r)
+
+            if changed:
+                ing.spec.rules = to_keep
+                # Clean TLS hosts for removed hosts
+                if ing.spec.tls:
+                    tls0 = ing.spec.tls[0]
+                    cur_hosts = list(tls0.hosts or [])
+                    new_hosts = [h for h in cur_hosts if h not in stale_hosts]
+                    tls0.hosts = new_hosts
+                    ing.spec.tls[0] = tls0
+                networking_v1.patch_namespaced_ingress(name=ingress_name, namespace=namespace, body=ing)
+        except Exception:
+            # Best-effort reconciler; swallow errors and retry
+            pass
+        time.sleep(interval_seconds)
+
+
 def _create_session_worker(job_id: str) -> None:
     """Background worker to create K8s resources and wait for readiness, updating job_status."""
     session_id = f"sess-{uuid.uuid4().hex[:8]}"
@@ -317,3 +376,12 @@ async def delete_session(session_id: str):
         pass
     _cleanup_k8s_resources(session_id, namespace)
     return {}
+
+
+# Start background reconciler to keep Ingress clean of stale session hosts
+_reconciler_thread = threading.Thread(
+    target=_reconcile_ingress_sessions,
+    kwargs={"namespace": os.environ.get("K8S_NAMESPACE", "default"), "interval_seconds": 30},
+    daemon=True,
+)
+_reconciler_thread.start()

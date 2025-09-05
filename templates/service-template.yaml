@@ -2,13 +2,16 @@ apiVersion: v1
 kind: Service
 metadata:
   name: service-{{SESSION_ID}}
+  annotations:
+    cloud.google.com/backend-config: '{"ports": {"command-ws":"command-ws-backendconfig", "vnc-stream":"vnc-stream-backendconfig"}}'
+    cloud.google.com/neg: '{"ingress": true}'
 spec:
   selector:
     app: session-{{SESSION_ID}}
   ports:
     - name: vnc-stream
-      port: 6901
-      targetPort: 6901
+      port: 6902
+      targetPort: 6902
     - name: command-ws
       port: 8765
       targetPort: 8765
