@@ -129,6 +129,106 @@ def _cleanup_k8s_resources(session_id: str, namespace: str) -> None:
             print(f"Error deleting ingress: {e.reason}")
 
 
+def _add_session_to_main_ingress(session_id: str, namespace: str) -> None:
+    """Add host rules and TLS host for the session to the shared main Ingress.
+
+    Routes traffic for:
+      - /command -> service-{session_id}: port name "command-ws"
+      - /stream  -> service-{session_id}: port name "vnc-stream"
+
+    Ensures TLS includes the hostname with a placeholder secret to satisfy
+    the GKE Ingress controller, while TLS termination uses the pre-shared cert.
+    """
+    host = f"{session_id}.vnc.shodh.ai"
+    ingress_name = "session-bubble-ingress"
+
+    ing: client.V1Ingress = networking_v1.read_namespaced_ingress(
+        name=ingress_name, namespace=namespace
+    )
+
+    if ing.spec is None:
+        ing.spec = client.V1IngressSpec()
+
+    # Ensure rules exists and the host rule is present
+    rules = list(ing.spec.rules or [])
+    exists = False
+    for r in rules:
+        if r.host == host:
+            exists = True
+            break
+    if not exists:
+        paths = [
+            client.V1HTTPIngressPath(
+                path="/stream",
+                path_type="Prefix",
+                backend=client.V1IngressBackend(
+                    service=client.V1IngressServiceBackend(
+                        name=f"service-{session_id}",
+                        port=client.V1ServiceBackendPort(name="vnc-stream"),
+                    )
+                ),
+            ),
+            client.V1HTTPIngressPath(
+                path="/command",
+                path_type="Prefix",
+                backend=client.V1IngressBackend(
+                    service=client.V1IngressServiceBackend(
+                        name=f"service-{session_id}",
+                        port=client.V1ServiceBackendPort(name="command-ws"),
+                    )
+                ),
+            ),
+        ]
+        rule = client.V1IngressRule(host=host, http=client.V1HTTPIngressRuleValue(paths=paths))
+        rules.append(rule)
+        ing.spec.rules = rules
+
+    # Ensure TLS block includes the host and has a secretName
+    tls_list = list(ing.spec.tls or [])
+    if not tls_list:
+        tls_list = [client.V1IngressTLS(hosts=[host], secret_name="ingress-tls-placeholder")]
+    else:
+        tls0 = tls_list[0]
+        tls0.hosts = list(tls0.hosts or [])
+        if host not in tls0.hosts:
+            tls0.hosts.append(host)
+        if not tls0.secret_name:
+            tls0.secret_name = "ingress-tls-placeholder"
+        tls_list[0] = tls0
+    ing.spec.tls = tls_list
+
+    networking_v1.patch_namespaced_ingress(name=ingress_name, namespace=namespace, body=ing)
+
+
+def _remove_session_from_main_ingress(session_id: str, namespace: str) -> None:
+    """Remove host rules and TLS host for the session from the shared main Ingress."""
+    host = f"{session_id}.vnc.shodh.ai"
+    ingress_name = "session-bubble-ingress"
+
+    try:
+        ing: client.V1Ingress = networking_v1.read_namespaced_ingress(name=ingress_name, namespace=namespace)
+    except client.ApiException as e:
+        if e.status == 404:
+            return
+        raise
+
+    changed = False
+    if ing.spec and ing.spec.rules:
+        new_rules = [r for r in ing.spec.rules if r.host != host]
+        if len(new_rules) != len(ing.spec.rules):
+            ing.spec.rules = new_rules
+            changed = True
+
+    if ing.spec and ing.spec.tls:
+        tls0 = ing.spec.tls[0]
+        if tls0.hosts and host in tls0.hosts:
+            tls0.hosts = [h for h in tls0.hosts if h != host]
+            changed = True
+
+    if changed:
+        networking_v1.patch_namespaced_ingress(name=ingress_name, namespace=namespace, body=ing)
+
+
 def _create_session_worker(job_id: str) -> None:
     """Background worker to create K8s resources and wait for readiness, updating job_status."""
     session_id = f"sess-{uuid.uuid4().hex[:8]}"
@@ -145,9 +245,8 @@ def _create_session_worker(job_id: str) -> None:
         service_body = render_template("service-template.yaml", session_id)
         core_v1.create_namespaced_service(namespace=namespace, body=service_body)
 
-        # Create Ingress
-        ingress_body = render_template("ingress-template.yaml", session_id)
-        networking_v1.create_namespaced_ingress(namespace=namespace, body=ingress_body)
+        # Route traffic for this session via the shared main Ingress
+        _add_session_to_main_ingress(session_id, namespace)
 
         # Wait for readiness
         deployment_name = f"session-{session_id}"
@@ -211,5 +310,10 @@ async def get_session_status(job_id: str):
 async def delete_session(session_id: str):
     """Delete all K8s resources for a given session."""
     namespace = os.environ.get("K8S_NAMESPACE", "default")
+    # Remove routing from the shared main Ingress first (best effort)
+    try:
+        _remove_session_from_main_ingress(session_id, namespace)
+    except Exception:
+        pass
     _cleanup_k8s_resources(session_id, namespace)
     return {}

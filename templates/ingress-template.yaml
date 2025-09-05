@@ -3,13 +3,14 @@ kind: Ingress
 metadata:
   name: ingress-{{SESSION_ID}}
   annotations:
-    networking.gke.io/pre-shared-certs: session-bubble-wildcard
+    networking.gke.io/pre-shared-certs: "session-bubble-wildcard"
+    kubernetes.io/ingress.allow-http: "false"
     cloud.google.com/backend-config: '{"ports": {"command-ws":"session-bubble-backendconfig", "vnc-stream":"vnc-stream-backendconfig"}}'
 spec:
   tls:
     - hosts:
         - {{SESSION_ID}}.vnc.shodh.ai
-      secretName: wildcard-vnc-shodh-ai-tls
+      secretName: ingress-tls-placeholder
   rules:
     - host: {{SESSION_ID}}.vnc.shodh.ai
       http:
