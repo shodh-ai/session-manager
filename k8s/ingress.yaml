@@ -1,0 +1,36 @@
+# session-manager/k8s/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: session-bubble-ingress
+  annotations:
+    # Use GKE Managed Certificate for TLS
+    networking.gke.io/managed-certificates: "shodh-ai-wildcard-cert"
+    kubernetes.io/ingress.global-static-ip-name: "session-bubble-ingress-ip"
+    # This backend config is for the session-manager itself
+    cloud.google.com/backend-config: '{"default": "session-manager-backendconfig"}'
+    # Enforce HTTPS only (valid TLS via managed cert)
+    kubernetes.io/ingress.allow-http: "false"
+spec:
+  rules:
+  # Rule for the main API (e.g., POST /api/sessions)
+  - host: api.vnc.shodh.ai
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: session-manager-service
+            port: { number: 80 }
+  # Rule for all dynamic session connections.
+  # ALL sess-*.vnc.shodh.ai traffic now goes to the session-manager.
+  - host: "*.vnc.shodh.ai"
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: session-manager-service
+            port: { number: 80 }

@@ -3,3 +3,5 @@ uvicorn
 kubernetes
 pydantic
 PyYAML
+websockets
+livekit

@@ -51,17 +51,32 @@ jobs:
 
       - name: Build and Push Docker Image
         run: |
-          IMAGE_PATH="${GAR_HOSTNAME}/${PROJECT_ID}/${IMAGE_REPOSITORY}/${IMAGE_NAME}:${GITHUB_SHA}"
-          docker build -t "$IMAGE_PATH" .
-          docker push "$IMAGE_PATH"
+          IMAGE_SHA="${GAR_HOSTNAME}/${PROJECT_ID}/${IMAGE_REPOSITORY}/${IMAGE_NAME}:${GITHUB_SHA}"
+          IMAGE_VER="${GAR_HOSTNAME}/${PROJECT_ID}/${IMAGE_REPOSITORY}/${IMAGE_NAME}:v2.0-webrtc"
+          docker build -t "$IMAGE_SHA" -t "$IMAGE_VER" .
+          docker push "$IMAGE_SHA"
+          docker push "$IMAGE_VER"
+
+      - name: Create/Update LiveKit credentials secret
+        run: |
+          kubectl create secret generic livekit-credentials \
+            --from-literal=LIVEKIT_URL='${{ secrets.LIVEKIT_URL }}' \
+            --from-literal=LIVEKIT_API_KEY='${{ secrets.LIVEKIT_API_KEY }}' \
+            --from-literal=LIVEKIT_API_SECRET='${{ secrets.LIVEKIT_API_SECRET }}' \
+            --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Deploy Session Manager to GKE
         run: |
-          IMAGE_PATH="${GAR_HOSTNAME}/${PROJECT_ID}/${IMAGE_REPOSITORY}/${IMAGE_NAME}:${GITHUB_SHA}"
+          IMAGE_PATH_VER="${GAR_HOSTNAME}/${PROJECT_ID}/${IMAGE_REPOSITORY}/${IMAGE_NAME}:v2.0-webrtc"
           # Apply RBAC and service/deployment
           kubectl apply -f k8s/permissions.yaml
+          # Apply BackendConfig used by the service
+          kubectl apply -f k8s/backend-config.yaml
           kubectl apply -f k8s/service.yaml
           kubectl apply -f k8s/deployment.yaml
           # Set the manager's own image
-          kubectl set image deployment/${DEPLOYMENT_NAME} manager="${IMAGE_PATH}"
+          kubectl set image deployment/${DEPLOYMENT_NAME} manager="${IMAGE_PATH_VER}"
+          # Apply shared ingress/cert managed by the session-manager
+          kubectl apply -f k8s/managed-certificate.yaml
+          kubectl apply -f k8s/ingress.yaml
           kubectl rollout status deployment/${DEPLOYMENT_NAME}

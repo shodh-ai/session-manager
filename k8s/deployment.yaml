@@ -15,15 +15,31 @@ spec:
       serviceAccountName: session-manager-sa
       containers:
         - name: manager
-          # TODO: Set to your built image in Artifact Registry, e.g.:
-          # image: asia-south1-docker.pkg.dev/first-cedar-470107-j2/session-manager/session-manager:latest
-          image: asia-south1-docker.pkg.dev/first-cedar-470107-j2/session-manager/session-manager:latest
+          image: asia-south1-docker.pkg.dev/first-cedar-470107-j2/session-manager/session-manager:v2.0-webrtc
           volumeMounts:
             - name: templates
               mountPath: /app/templates
               readOnly: true
           ports:
             - containerPort: 80
+          env:
+            - name: LIVEKIT_URL
+              valueFrom:
+                secretKeyRef:
+                  name: livekit-credentials
+                  key: LIVEKIT_URL
+            - name: LIVEKIT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: livekit-credentials
+                  key: LIVEKIT_API_KEY
+            - name: LIVEKIT_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: livekit-credentials
+                  key: LIVEKIT_API_SECRET
+            - name: SESSION_BUBBLE_IMAGE_TAG
+              value: "v2.0-webrtc"
       volumes:
         - name: templates
           configMap:

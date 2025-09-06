@@ -1,0 +1,9 @@
+# session-manager/k8s/managed-certificate.yaml
+apiVersion: networking.gke.io/v1
+kind: ManagedCertificate
+metadata:
+  name: shodh-ai-wildcard-cert
+spec:
+  domains:
+    - 'api.vnc.shodh.ai'
+    - '*.vnc.shodh.ai'

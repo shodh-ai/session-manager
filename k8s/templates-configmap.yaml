@@ -29,73 +29,25 @@ data:
           containers:
             - name: session-bubble
               image: asia-south1-docker.pkg.dev/first-cedar-470107-j2/session-bubble/session-bubble:{{IMAGE_TAG}}
-              ports:
-                - name: vnc-stream
-                  containerPort: 6901
-                - name: command-ws
-                  containerPort: 8765
-            # Health sidecar to satisfy HTTP health checks from GCE Ingress
-            - name: healthz
-              image: gcr.io/google-samples/hello-app:1.0
-              ports:
-                - containerPort: 8080
-            # WebSocket proxy for VNC stream: terminates WS and forwards to raw VNC on 6901
-            - name: websockify
-              image: efrecon/websockify:latest
-              args:
-                - 0.0.0.0:6902
-                - 127.0.0.1:6901
-              ports:
-                - containerPort: 6902
-                  name: vnc-ws
-  service-template.yaml: |
-    apiVersion: v1
-    kind: Service
-    metadata:
-      name: service-{{SESSION_ID}}
-      annotations:
-        cloud.google.com/backend-config: '{"ports": {"command-ws":"command-ws-backendconfig", "vnc-stream":"vnc-stream-backendconfig"}}'
-        cloud.google.com/neg: '{"ingress": true}'
-    spec:
-      selector:
-        app: session-{{SESSION_ID}}
-      ports:
-        - name: vnc-stream
-          port: 6901
-          targetPort: 6902
-        - name: command-ws
-          port: 8765
-          targetPort: 8765
-      type: ClusterIP
-  ingress-template.yaml: |
-    apiVersion: networking.k8s.io/v1
-    kind: Ingress
-    metadata:
-      name: ingress-{{SESSION_ID}}
-      annotations:
-        networking.gke.io/pre-shared-certs: "session-bubble-wildcard"
-        kubernetes.io/ingress.allow-http: "false"
-        cloud.google.com/backend-config: '{"ports": {"command-ws":"command-ws-backendconfig", "vnc-stream":"vnc-stream-backendconfig"}}'
-    spec:
-      tls:
-        - hosts:
-            - {{SESSION_ID}}.vnc.shodh.ai
-          secretName: ingress-tls-placeholder
-      rules:
-        - host: {{SESSION_ID}}.vnc.shodh.ai
-          http:
-            paths:
-              - path: /stream
-                pathType: Prefix
-                backend:
-                  service:
-                    name: service-{{SESSION_ID}}
-                    port:
-                      name: vnc-stream
-              - path: /command
-                pathType: Prefix
-                backend:
-                  service:
-                    name: service-{{SESSION_ID}}
-                    port:
-                      name: command-ws'
+              env:
+                - name: SESSION_ID
+                  value: "{{SESSION_ID}}"
+                - name: LIVEKIT_ROOM_NAME
+                  value: "{{SESSION_ID}}"
+                - name: LIVEKIT_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: livekit-credentials
+                      key: LIVEKIT_URL
+                - name: LIVEKIT_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: livekit-credentials
+                      key: LIVEKIT_API_KEY
+                - name: LIVEKIT_API_SECRET
+                  valueFrom:
+                    secretKeyRef:
+                      name: livekit-credentials
+                      key: LIVEKIT_API_SECRET
+  # service-template.yaml removed (no longer needed with LiveKit-only architecture)
+  # ingress-template.yaml removed (using static ingress)

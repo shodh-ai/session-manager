@@ -17,23 +17,28 @@ spec:
       containers:
         - name: session-bubble
           image: asia-south1-docker.pkg.dev/first-cedar-470107-j2/session-bubble/session-bubble:{{IMAGE_TAG}}
-          ports:
-            - name: vnc-stream
-              containerPort: 6901
-            - name: command-ws
-              containerPort: 8765
-          # Add resources/env as needed to mirror your working spec
-        # Health sidecar to satisfy HTTP health checks from GCE Ingress
-        - name: healthz
-          image: gcr.io/google-samples/hello-app:1.0
-          ports:
-            - containerPort: 8080
-        # WebSocket proxy for VNC stream: terminates WS and forwards to raw VNC on 6901
-        - name: websockify
-          image: websockify/websockify:latest
-          args:
-            - 0.0.0.0:6902
-            - 127.0.0.1:6901
-          ports:
-            - containerPort: 6902
-              name: vnc-ws
+          # LiveKit-only container. No container ports required.
+          env:
+            - name: SESSION_ID
+              value: "{{SESSION_ID}}"
+            - name: LIVEKIT_ROOM_NAME
+              value: "{{SESSION_ID}}"
+            - name: LIVEKIT_URL
+              valueFrom:
+                secretKeyRef:
+                  name: livekit-credentials
+                  key: LIVEKIT_URL
+            - name: LIVEKIT_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: livekit-credentials
+                  key: LIVEKIT_API_KEY
+            - name: LIVEKIT_API_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: livekit-credentials
+                  key: LIVEKIT_API_SECRET
+            - name: DISPLAY
+              value: ":99"
+            - name: VNC_RESOLUTION
+              value: "1280x720"
